@@ -32,6 +32,23 @@ class Node:
                   self.id, kind, list(self.props.keys()))
 
     def to_kv(self, indent=0):
+        # ========================================================
+        # |一些烦人的东西|
+        # ====================
+        # 坑名：
+        #     KV 里 `<Button>:` 是类规则，`Button:` 是实例
+        # 证实方式：
+        #     https://stackoverflow.com/questions/52689903/
+        #     原文："mybutton: provides a rule for how to build Word
+        #            objects. If you change mybutton: to Button: in
+        #            your .kv file, then your call to Word() in build()
+        #            will create a Word instance with a button already
+        #            in it."
+        #     `<Button>:` 给类加全局规则，多个会互相覆盖；
+        #     `Button:` 才是在父级里放实例。这是语义修正。
+        # ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        # ====================
+        # ========================================================
         pad = "    " * indent
         lines = [f"{pad}{self.kind}:"]     # 去掉尖括号
         for k, val in self.props.items():

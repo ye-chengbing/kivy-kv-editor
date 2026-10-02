@@ -21,12 +21,18 @@ class PaletteItem(Button):
         self.editor = editor
 
     def _window_pos(self, touch):
-        """关键修复：把 touch 坐标（相对 self.parent）转成窗口坐标。
+        """把 touch 坐标转成窗口坐标。
 
-        touch.x/y 在 widget 回调里是相对 widget.parent 的坐标系，
-        而 self.x/y 也是相对 widget.parent 的，所以：
-            self 局部坐标 = touch - self.pos
-            窗口坐标 = self.to_window(self 局部坐标)
+        |一些烦人的东西|
+        ====================
+        坑名：
+            touch.x/y 在 widget 回调里是相对 widget.parent 的坐标系
+        证实方式：
+            不清楚咋回事，没查到资料，但这样写能用。
+            （用 to_window 转换后坐标正确，但没找到官方文档
+             明确说明 touch 坐标的坐标系归属。）
+        ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        ====================
         """
         lx = touch.x - self.x
         ly = touch.y - self.y

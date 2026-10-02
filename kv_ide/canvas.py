@@ -14,34 +14,37 @@ log = get_logger("canvas")
 class CanvasNode(Button):
     """可视节点。
 
-    【坑 B 的对应修复】不手写 graphics 模仿官方组件——之前试过在
-    self.canvas.before 里画 Rectangle(pos=...)，基准是 widget 局部坐标
-    而非父级，结果所有控件蓝框堆到画布左下角。改成继承 Kivy 官方
-    Button 后，渲染完全交给 Kivy，不用自己管 draw 逻辑。
-
     ============================================================
-    【坐标语义·重要 · 别动】
-    ============================================================
-    Kivy 官方文档明确：FloatLayout 【不转换】子控件坐标系统。
-    子控件的 x/y/center 和 touch.pos 一样，都是【窗口坐标】。
+    |一些烦人的东西|
+    ====================
+    坑名：
+        手写 graphics 模仿官方组件，蓝框堆在画布左下角
+    证实方式：
+        https://stackoverflow.com/questions/32752894/
+        原文："Your drawing code is running before the label pos has
+               been set by its parent layout - basically you're
+               hitting the issue that your rectangle position doesn't
+               update when the label position later does."
+        Rectangle 的 pos 不会自动跟随 widget 移动，必须手动 bind。
+        所以不要手写 graphics 模仿组件，直接继承官方 Button。
+    ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+    ====================
 
-    只有以下四种容器在父链中时，才会让子控件坐标相对自己：
-        RelativeLayout / Scatter / ScatterLayout / ScrollView
-    FloatLayout 不在其中。
-
-    来源（证据）：
-      https://kivy.org/doc/stable-2.3.0/api-kivy.uix.relativelayout.html
-      #coordinate-systems
-      → "these coordinate systems are identical to the window
-         coordinate system as long as a relative layout type widget
-         is not in the widget's parent stack."
-
-    ⚠️ 历史教训（v0.0.5 踩过，别重犯）：
-    不要把 cn.center 改成 "mx - canvas.x" 这种"局部坐标"写法！
-    FloatLayout 不会把它当局部坐标解释，控件会往左偏 cw.x=180。
-    这个坑 v0.0.4 → v0.0.5 来回折腾了两天，2026-10-01 又差点绕回去。
-    以后所有节点坐标一律用【窗口坐标】，只在算 pos_hint 时
-    才减 canvas.pos 转成比例。
+    |一些烦人的东西|
+    ====================
+    坑名：
+        FloatLayout 不转换子控件坐标，误当局部坐标处理会偏 180px
+    证实方式：
+        https://kivy.org/doc/stable-2.3.0/api-kivy.uix.relativelayout.html
+        #coordinate-systems
+        原文："these coordinate systems are identical to the window
+               coordinate system as long as a relative layout type
+               widget is not in the widget's parent stack."
+        只有 RelativeLayout / Scatter / ScatterLayout / ScrollView
+        在父链中时才会转换子控件坐标。FloatLayout 不在其中。
+        v0.0.4→v0.0.5 在这个点来回折腾两天，别重犯！！
+    ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+    ====================
     ============================================================
     """
 
@@ -144,20 +147,43 @@ class Canvas(FloatLayout):
     - 语义上明确"这是容器，子控件挂在里面"
     - 未来可用 pos_hint 布局，为裁剪 / 滚动 / 缩放铺路
 
-    ⚠️ 但【不改坐标系统】——FloatLayout 的子控件 x/y 仍是窗口坐标。
-    证据与详细说明见 CanvasNode 类 docstring 顶部的 "坐标语义" 段，
-    以及：https://kivy.org/doc/stable-2.3.0/api-kivy.uix.relativelayout
-           .html#coordinate-systems
+    |一些烦人的东西|
+    ====================
+    坑名：
+        FloatLayout 不改变子控件坐标系统，子控件 x/y 仍是窗口坐标
+    证实方式：
+        https://kivy.org/doc/stable-2.3.0/api-kivy.uix.relativelayout.html
+        #coordinate-systems
+        上述 URL 明确列出只有 RelativeLayout / Scatter /
+        ScatterLayout / ScrollView 会转换坐标。
+        FloatLayout 的 do_layout() 只处理 size_hint 和 pos_hint，
+        不改变子控件的坐标系。
+    ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+    ====================
 
-    【坑 B 边界】这里的 graphics 是【合法的】——背景就是画一块相对
-    self 的矩形，基准和同步逻辑都自洽。要画【控件级】的可视元素，
-    一律继承官方组件，不要自己 draw。
+    这里的 graphics 是【合法的】——背景就是画一块相对self 的矩形，基准和同步逻辑都自洽。
     """
 
     editor = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kw):
         super().__init__(**kw)
+        # ========================================================
+        # |一些烦人的东西|
+        # ====================
+        # 坑名：
+        #     canvas.before / canvas.after 的执行顺序
+        # 证实方式：
+        #     https://kivy.org/doc/stable/guide/graphics.html
+        #     原文："The instructions in these groups will be executed
+        #            before and after the canvas group respectively.
+        #            This means that they will appear under (be executed
+        #            before) and above (be executed after) them."
+        #     canvas.before 的指令在 widget 主 canvas 之前执行，
+        #     视觉上在下层。背景用 canvas.before 是正确的。
+        # ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        # ====================
+        # ========================================================
         with self.canvas.before:
             Color(0.12, 0.13, 0.15, 1)
             self._bg = Rectangle(pos=self.pos, size=self.size)

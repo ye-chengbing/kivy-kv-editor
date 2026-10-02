@@ -125,29 +125,65 @@ class KVEditor(BoxLayout):
 
     # ---------- 键盘 ----------
     def _on_key_down(self, window, key, scancode, codepoint, modifiers):
-        # Window.on_key_down 与焦点链是并行两条路（SDL 层直接派发），
-        # 无条件触发，不是"焦点组件处理了就冒泡终止"。
-        # 所以必须手动检查"焦点是否在 TextInput"。
-        # 见 Kivy 源码 window_sdl2.py 的 mainloop 与
-        # window/__init__.py 的 _on_window_key_down。
+        # ========================================================
+        # |一些烦人的东西|
+        # ====================
+        # 坑名：
+        #     Window.on_key_down 与焦点链是并行两条路，无条件触发
+        # 证实方式：
+        #     https://kivy.org/doc/stable/api-kivy.core.window.html
+        #     #kivy.core.window.Window.on_key_down
+        #     TextInput 的 keyboard_on_key_down 是另一条路：
+        #     https://kivy.readthedocs.io/en/master/api-kivy.uix.textinput
+        #     .html#kivy.uix.textinput.TextInput.keyboard_on_key_down
+        #     原文："The method bound to the keyboard when the instance
+        #            has focus... will be called for every input press."
+        #     两条路并行，不互相拦截。所以 Window.on_key_down 里
+        #     必须手动检查焦点是否在 TextInput。
+        # ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        # ====================
+        # ========================================================
         kb = getattr(window, "_system_keyboard", None)
         focus = getattr(kb, "widget", None) if kb else None
         if isinstance(focus, TextInput):
             return False
 
-        # 焦点丢失时按 Backspace 会误删控件；Kivy 2.x TextInput 处理
-        # DELETE(127)——本项目锁 2.x。
+        # ========================================================
+        # |一些烦人的东西|
+        # ====================
+        # 坑名：
+        #     Kivy 里 Delete 键的 keycode 是 127，Backspace 是 8
+        # 证实方式：
+        #     Kivy 源码 textinput.py 的 interesting_keys：
+        #     https://github.com/kivy/kivy/blob/master/kivy/uix/textinput.py
+        #     原文：`{ 8: 'backspace', 13: 'enter', 127: 'del', ... }`
+        #     文档：https://kivy.readthedocs.io/en/master/api-kivy.uix
+        #     .textinput.html
+        #     "Del — Delete the selection of character after the cursor"
+        # ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        # ====================
+        # ========================================================
         if key != 127:
             return False
 
         # 【实测用】无论带不带 Ctrl 都打印。实测确认后可删。
         log.debug("Delete 键触发 modifiers=%r", modifiers)
 
-        # Delete 必须配合 Ctrl 才删控件。
-        # modifiers 命名在不同平台 / 窗口后端下不稳定：
-        #   X11 后端给 'ctrl'；SDL2 可能给 'lctrl'/'rctrl'。
-        #   根因：kivy/core/window/keycodes.py 里 'ctrl' 和 'lctrl'
-        #   共享 keycode 305，反查回哪个字符串取决于字典遍历顺序。
+        # ========================================================
+        # |一些烦人的东西|
+        # ====================
+        # 坑名：
+        #     modifiers 命名在不同平台/后端下不稳定
+        # 证实方式：
+        #     Kivy 源码 keycodes 表同时有 'lctrl': 305 和 'rctrl': 306：
+        #     https://kivy.org/doc/stable/api-kivy.core.window.html
+        #     StackOverflow 2016 年实测给的是 'lctrl'：
+        #     https://stackoverflow.com/questions/35669747/
+        #     当前环境实测给 'ctrl'（见 editor.log），但不保证换平台
+        #     也给 'ctrl'。三种全接受。
+        # ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        # ====================
+        # ========================================================
         _CTRL_MODS = {'ctrl', 'lctrl', 'rctrl'}
         if not (_CTRL_MODS & set(modifiers)):
             return False
@@ -189,8 +225,16 @@ class KVEditor(BoxLayout):
     def _canvas_window_origin(self):
         """返回 canvas 相对窗口的坐标（左下角）。
 
-        本环境下 Kivy 把嵌套 Canvas.x 设成了相对窗口的绝对坐标
-        （cw.x=180 就是 palette 宽度）。直接返回 (cw.x, cw.y)。
+        |一些烦人的东西|
+        ====================
+        坑名：
+            本环境下 Kivy 把嵌套 Canvas.x 设成了相对窗口的绝对坐标
+        证实方式：
+            不清楚咋回事，没查到资料，但这样写能用。
+            （cw.x=180 就是 palette 宽度，直接在日志里观察到，
+             但没找到 Kivy 官方文档或社区解释这个行为。）
+        ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        ====================
         """
         cw = self.canvas_widget
         log.debug("_canvas_window_origin canvas.pos=(%.1f,%.1f) "
@@ -248,7 +292,7 @@ class KVEditor(BoxLayout):
         # 所以这里直接 cn.center = (mx, my)，不要写成 (mx - cw.x, ...)。
         # 证据：https://kivy.org/doc/stable-2.3.0/api-kivy.uix.relativelayout
         #       .html#coordinate-systems
-        # ⚠️ v0.0.4 → v0.0.5 在这个点来回折腾两天，别重犯。
+        # v0.0.4 → v0.0.5 在这个点来回折腾两天，别重犯。
         # ========================================================
         log.debug("create_node 入口 kind=%s drop_pos=%s", kind, drop_pos)
         node = Node(kind)
@@ -362,9 +406,19 @@ class KVEditor(BoxLayout):
         self.sync_pos_hint(cn)
         log.info("set_size id=%s %s=%.1f", cn.node.id, axis, v)
         self.refresh_code()
-        # 【坑 D 源头】这里会重建整个属性面板 → 旧输入框销毁 → 焦点丢。
-        # 短期修：_on_key_down 只响应 127 且必须带 Ctrl。
-        # 中期修（v0.0.6）：show_props 只在选中对象换了才重建。
+        # ========================================================
+        # |一些烦人的东西|
+        # ====================
+        # 坑名：
+        #     show_props 的 clear_widgets 导致输入框焦点丢失，
+        #     进而 Backspace 误删控件
+        # 证实方式：
+        #     不清楚咋回事，没查到资料，但这样写能用。
+        #     （只知道 clear_widgets 会销毁旧输入框，焦点凭空消失，
+        #       但没找到 Kivy 官方文档解释焦点链的恢复机制。）
+        # ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
+        # ====================
+        # ========================================================
         self.inspector.show_props(cn)
 
     # ---------- KV ----------
