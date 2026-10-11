@@ -1,9 +1,8 @@
-# kivy-kv-editor
+# <p align="center"> <img width="256" height="256" alt="kivy-kv-editor" src="https://github.com/user-attachments/assets/dc9cb736-906c-4818-be96-cff7d6312904" /> </p> <div align="center">A drag-and-drop visual editor for Kivy KV language.<br>Built with Python. Actively maintained.</div>
 
-A drag-and-drop visual editor for Kivy KV language.  
-Built with Python. Actively maintained.
-
-![Demo](https://github.com/user-attachments/assets/152e05d3-f2d4-4e81-ad09-7ac90f3f4f7c)
+<table align="center">
+<tr>
+<td valign="top">
 
 ## Features
 
@@ -11,6 +10,13 @@ Built with Python. Actively maintained.
 - Edit properties like text, width, and height
 - Generate and copy KV code to your clipboard
 - Lightweight and easy to run
+
+</td>
+<td valign="top">
+  <img src="https://github.com/user-attachments/assets/152e05d3-f2d4-4e81-ad09-7ac90f3f4f7c" alt="Demo"/>
+</td>
+</tr>
+</table>
 
 ## Quick Start
 
@@ -66,3 +72,4 @@ Click the button in the bottom-right corner. The generated KV code will be copie
 ## Contributing
 
 This project is still active and I'm improving it. If you're interested, give it a star or open an issue — it means a lot to me.
+<p align="center"> <img alt="© 2026 ye-chengbing · MIT License" src="https://github.com/user-attachments/assets/8a2672ba-bb80-4483-9ae8-cc088b6f9c00" /> </p>
