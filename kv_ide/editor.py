@@ -1,4 +1,7 @@
 """编辑器主协调器：连接 palette / canvas / inspector，处理拖拽和节点管理。"""
+import json
+import os
+
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.properties import ObjectProperty
@@ -25,14 +28,16 @@ class KVEditor(BoxLayout):
         super().__init__(orientation="horizontal", **kw)
         self.nodes = []
         self._drag_kind = None
+        # 根节点信息：用户在 Inspector 里改类名，导出时用来生成 KV 首行
+        self.root_class_name = "MyRoot"
+        self.root_type = "FloatLayout"
         self._build_ui()
+        self.inspector.show_props(None)   # 初始显示根名输入框
         log.info("KVEditor 初始化完成")
         from kivy.clock import Clock
         Clock.schedule_once(self._log_layout, 0.5)
         Window.bind(on_key_down=self._on_key_down)
         # 【v0.0.5 修复】Canvas 尺寸变化时重新 clamp 所有节点。
-        # 不加这个的话：窗口从最大化恢复后，原来在新边界内合法的
-        # 节点位置会超出缩小后的边界，看上去"卡在画布外回不来"。
         self.canvas_widget.bind(size=self._on_canvas_resize)
 
     # ---------- UI ----------
@@ -45,14 +50,20 @@ class KVEditor(BoxLayout):
 
         toolbar = BoxLayout(size_hint_y=None, height=dp(44),
                             padding=dp(6), spacing=dp(6))
-        toolbar.add_widget(Label(text="画布", color=(0.85, 0.85, 0.85, 1),
+        toolbar.add_widget(Label(text="Canvas", color=(0.85, 0.85, 0.85, 1),
                                  size_hint_x=None, width=dp(60)))
-        btn_del = Button(text="删除选中", size_hint_x=None, width=dp(90))
+        btn_del = Button(text="Delete", size_hint_x=None, width=dp(70))
         btn_del.bind(on_release=self.delete_selected)
         toolbar.add_widget(btn_del)
-        btn_clear = Button(text="清空", size_hint_x=None, width=dp(70))
+        btn_clear = Button(text="Clear", size_hint_x=None, width=dp(60))
         btn_clear.bind(on_release=self.clear_canvas)
         toolbar.add_widget(btn_clear)
+        btn_export = Button(text="Export", size_hint_x=None, width=dp(70))
+        btn_export.bind(on_release=self.export_files)
+        toolbar.add_widget(btn_export)
+        btn_import = Button(text="Import", size_hint_x=None, width=dp(70))
+        btn_import.bind(on_release=self.import_json)
+        toolbar.add_widget(btn_import)
         center.add_widget(toolbar)
 
         self.canvas_widget = Canvas(editor=self)
@@ -86,12 +97,7 @@ class KVEditor(BoxLayout):
 
     # ---------- Canvas 尺寸变化 ----------
     def _on_canvas_resize(self, canvas, new_size):
-        """Canvas 尺寸变化（窗口最大化/恢复）时，重新 clamp 所有节点。
-
-        【v0.0.5 修复】原 bug：最大化时节点放在 y=900（合法，边界 979），
-        恢复窗口后 cw.height 变回 806，节点还在 y=900，吊在画布外。
-        这个方法在每次 canvas 尺寸变化时把节点拉回新边界内。
-        """
+        """Canvas 尺寸变化（窗口最大化/恢复）时，重新 clamp 所有节点。"""
         if not self.nodes:
             return
         log.info("Canvas resize → %dx%d，重新 clamp %d 个节点",
@@ -102,9 +108,16 @@ class KVEditor(BoxLayout):
     def _clamp_node(self, cn):
         """把单个节点夹回 Canvas 内（窗口坐标）。
 
-        统一三处调用点：create_node / set_size / _on_canvas_resize。
-        所有比较和赋值都在窗口坐标系里做——cn.center 是窗口坐标，
-        cw.x/cw.y/cw.width/cw.height 也是窗口坐标。
+        ==========
+        用于：
+            统一三处调用点：create_node / set_size / _on_canvas_resize。
+            所有比较和赋值都在窗口坐标系里做——cn.center 是窗口坐标，
+            cw.x/cw.y/cw.width/cw.height 也是窗口坐标。
+        输入：
+            A：cn: CanvasNode — 待夹紧的节点
+        输出：
+            无返回值。副作用：必要时改 cn.center，并刷新 pos_hint。
+        ==========
         """
         cw = self.canvas_widget
         if cw.width <= 0 or cw.height <= 0:
@@ -198,8 +211,6 @@ class KVEditor(BoxLayout):
         return getattr(app, "root_layout", None)
 
     def start_drag(self, kind, wx, wy):
-        # ghost 是拖动预览，要跟随鼠标在整个窗口上跑，
-        # 所以挂在 root_layout（覆盖全窗口），不挂 canvas。
         mx, my = Window.mouse_pos
         overlay = self._overlay()
         if overlay is None:
@@ -243,11 +254,6 @@ class KVEditor(BoxLayout):
         return (cw.x, cw.y)
 
     def end_drag(self, wx, wy, kind):
-        """松手时决定是否创建控件。
-
-        【坑 A】用 Window.mouse_pos 作为权威窗口坐标。
-        palette 传来的坐标只作参考。
-        """
         overlay = self._overlay()
         if self.ghost and overlay:
             overlay.remove_widget(self.ghost)
@@ -302,10 +308,8 @@ class KVEditor(BoxLayout):
         cw.add_widget(cn)
 
         mx, my = Window.mouse_pos
-        # 窗口坐标，和 mouse_pos 同一系统
         cn.center = (mx, my)
 
-        # clamp：限制在画布的【窗口矩形】内（统一走 _clamp_node）
         self._clamp_node(cn)
 
         log.info("create_node id=%s canvas.pos=(%.1f,%.1f) "
@@ -328,8 +332,6 @@ class KVEditor(BoxLayout):
             return
         # 【窗口坐标 → 比例】cn.center 是窗口坐标，减 cw.x/y 得相对
         # canvas 的局部坐标，再除以 canvas 尺寸得 pos_hint 比例。
-        # 注意：这里减 cw.x/y 是【只为了算比例】，不是把 cn.center
-        # 本身改成局部坐标——cn.center 永远是窗口坐标。
         lx = cn.center_x - cw.x
         ly = cn.center_y - cw.y
         cn.node.props["pos_hint"] = {
@@ -351,7 +353,6 @@ class KVEditor(BoxLayout):
             log.debug("delete_selected: 当前无选中")
             return
         log.info("delete_selected id=%s", self.selected.node.id)
-        # 【v0.0.5】节点挂 canvas，不是 root_layout
         cw = self.canvas_widget
         if self.selected.parent is cw:
             cw.remove_widget(self.selected)
@@ -364,7 +365,6 @@ class KVEditor(BoxLayout):
 
     def clear_canvas(self, *a):
         log.info("clear_canvas 入口 nodes数=%d", len(self.nodes))
-        # 【v0.0.5】节点挂 canvas，不是 root_layout
         cw = self.canvas_widget
         for n in list(self.nodes):
             if n.parent is cw:
@@ -377,13 +377,54 @@ class KVEditor(BoxLayout):
 
     # ---------- 属性 ----------
     def set_prop(self, cn, key, value):
-        # 【坑 C 的对应修复】文字修改走 cn.text（Kivy Button 的属性），
-        # 不再碰 cn._label 这种幽灵字段。
         old = cn.node.props.get(key)
         cn.node.props[key] = value
         if key == "text":
             cn.text = value
         log.info("set_prop id=%s %s: %r → %r", cn.node.id, key, old, value)
+        self.refresh_code()
+
+    def set_id(self, cn, new_id):
+        """修改节点 id。id 是数据层字段，不是 cn.node.props 里的属性。
+
+        ==========
+        用于：
+            用户改 Inspector 里的 ID 输入框时调用。改完刷新 KV。
+        输入：
+            A：cn: CanvasNode — 待改 id 的节点
+            B：new_id: str — 新 id（去首尾空白；空则忽略）
+        输出：
+            无返回值。副作用：改 cn.node.id，刷新 KV + 属性面板。
+        ==========
+        """
+        new_id = new_id.strip()
+        if not new_id:
+            return
+        old = cn.node.id
+        if old == new_id:
+            return
+        cn.node.id = new_id
+        log.info("set_id %s → %s", old, new_id)
+        self.refresh_code()
+        self.inspector.show_props(cn)
+
+    def set_root_class_name(self, name):
+        """修改根节点类名（KV 首行 `<XXX>:` 里的 XXX）。
+
+        ==========
+        用于：
+            用户改 Inspector 的 Root Name 输入框时调用。
+        输入：
+            A：name: str — 新类名（去首尾空白；空则忽略）
+        输出：
+            无返回值。副作用：改 self.root_class_name，刷新 KV。
+        ==========
+        """
+        name = name.strip()
+        if not name or name == self.root_class_name:
+            return
+        log.info("根类名 %s → %s", self.root_class_name, name)
+        self.root_class_name = name
         self.refresh_code()
 
     def set_size(self, cn, axis, value):
@@ -400,9 +441,7 @@ class KVEditor(BoxLayout):
             cn.node.props["size"] = (cn.width, v)
         cn.node.props["size_hint"] = (None, None)
 
-        # 改尺寸后可能超出画布边界，同步 clamp（统一走 _clamp_node）
         self._clamp_node(cn)
-
         self.sync_pos_hint(cn)
         log.info("set_size id=%s %s=%.1f", cn.node.id, axis, v)
         self.refresh_code()
@@ -421,10 +460,167 @@ class KVEditor(BoxLayout):
         # ========================================================
         self.inspector.show_props(cn)
 
+    # ---------- 导出 / 导入 ----------
+    def export_files(self, *a):
+        """弹出文件对话框，导出 .kv + .json 两个文件。
+
+        ==========
+        用于：
+            工具栏 Export 按钮。
+            .kv 是给用户的 Kivy 布局；.json 是编辑器元数据（含层级/数据/id）。
+        输入：
+            无
+        输出：
+            无返回值。副作用：写两个文件到用户选定目录。
+        ==========
+        """
+        from kivy.uix.popup import Popup
+        from kivy.uix.filechooser import FileChooserListView
+
+        content = BoxLayout(orientation="vertical",
+                            spacing=dp(6), padding=dp(6))
+        filechooser = FileChooserListView(path=".", dirselect=False)
+        content.add_widget(filechooser)
+
+        name_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(6))
+        name_row.add_widget(Label(text="Filename:", size_hint_x=None,
+                                  width=dp(90),
+                                  color=(0.85, 0.85, 0.85, 1)))
+        name_input = TextInput(text="layout", multiline=False)
+        name_row.add_widget(name_input)
+        content.add_widget(name_row)
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+        btn_save = Button(text="Save")
+        btn_cancel = Button(text="Cancel")
+        btn_row.add_widget(btn_save)
+        btn_row.add_widget(btn_cancel)
+        content.add_widget(btn_row)
+
+        popup = Popup(title="Export KV + JSON", content=content,
+                      size_hint=(0.9, 0.9))
+
+        def do_save(*a):
+            fname = name_input.text.strip() or "layout"
+            base = os.path.join(filechooser.path, fname)
+            kv_path = base + ".kv"
+            json_path = base + ".json"
+            try:
+                with open(kv_path, "w", encoding="utf-8") as f:
+                    f.write(self.inspector.code_out.text)
+                data = {
+                    "version": 1,
+                    "root": {
+                        "type": self.root_type,
+                        "props": {},
+                        "children": [n.node.to_json() for n in self.nodes],
+                    },
+                }
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                log.info("导出成功: %s, %s", kv_path, json_path)
+            except Exception as e:
+                log.exception("导出失败: %s", e)
+            popup.dismiss()
+
+        btn_save.bind(on_release=do_save)
+        btn_cancel.bind(on_release=popup.dismiss)
+        popup.open()
+
+    def import_json(self, *a):
+        """弹出文件对话框，读取 .json 恢复节点树。
+
+        ==========
+        用于：
+            工具栏 Import 按钮。读取之前导出的 .json，
+            清空画布并按 pos_hint 反算位置重建所有节点。
+        输入：
+            无
+        输出：
+            无返回值。副作用：重写 self.nodes，刷新画布和 KV。
+        ==========
+        """
+        from kivy.uix.popup import Popup
+        from kivy.uix.filechooser import FileChooserListView
+
+        content = BoxLayout(orientation="vertical",
+                            spacing=dp(6), padding=dp(6))
+        filechooser = FileChooserListView(path=".", filters=["*.json"])
+        content.add_widget(filechooser)
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+        btn_load = Button(text="Load")
+        btn_cancel = Button(text="Cancel")
+        btn_row.add_widget(btn_load)
+        btn_row.add_widget(btn_cancel)
+        content.add_widget(btn_row)
+
+        popup = Popup(title="Import JSON", content=content,
+                      size_hint=(0.9, 0.9))
+
+        def do_load(*a):
+            if not filechooser.selection:
+                log.warning("import_json: 未选中文件")
+                return
+            path = filechooser.selection[0]
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception as e:
+                log.exception("读 JSON 失败: %s", e)
+                popup.dismiss()
+                return
+
+            # 清空画布（不调 clear_canvas，避免中途 refresh）
+            cw = self.canvas_widget
+            for n in list(self.nodes):
+                if n.parent is cw:
+                    cw.remove_widget(n)
+            self.nodes.clear()
+            self.selected = None
+
+            # 重建
+            max_num = 0
+            for child_data in data.get("root", {}).get("children", []):
+                node = Node.from_json(child_data)
+                cn = CanvasNode(node, self)
+                cw.add_widget(cn)
+
+                # 从 pos_hint 反算窗口坐标
+                ph = node.props.get("pos_hint", {})
+                cx = ph.get("center_x", 0.5)
+                cy = ph.get("center_y", 0.5)
+                win_cx = cw.x + cx * cw.width
+                win_cy = cw.y + cy * cw.height
+                cn.center = (win_cx, win_cy)
+                self._clamp_node(cn)
+
+                self.nodes.append(cn)
+
+                # 更新 _counter 防撞 id
+                nid = node.id
+                if nid.startswith("w"):
+                    try:
+                        max_num = max(max_num, int(nid[1:]))
+                    except ValueError:
+                        pass
+
+            Node._counter = max_num
+            self.inspector.show_props(None)
+            self.refresh_code()
+            log.info("导入成功: %s (%d 个节点)", path, len(self.nodes))
+            popup.dismiss()
+
+        btn_load.bind(on_release=do_load)
+        btn_cancel.bind(on_release=popup.dismiss)
+        popup.open()
+
     # ---------- KV ----------
     def refresh_code(self):
-        # 【API 事实 3.4】外层包 <EditorRoot@FloatLayout>，里面放实例。
-        lines = ["<EditorRoot@FloatLayout>:"]
+        # 【API 事实 3.4】外层是类规则 `<XXX>:`，XXX 由 self.root_class_name
+        # 决定（用户在 Inspector 无选中时改）。用户 py 里写
+        # `class XXX(FloatLayout):` 对应。
+        lines = [f"<{self.root_class_name}>:"]
         for n in self.nodes:
             lines.append(n.node.to_kv(1))
         self.inspector.set_code("\n".join(lines))

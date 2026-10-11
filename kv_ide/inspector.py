@@ -17,7 +17,7 @@ class Inspector(BoxLayout):
         self.editor = editor
 
         # 属性区
-        self.add_widget(Label(text="[b]属性[/b]", markup=True,
+        self.add_widget(Label(text="[b]Properties[/b]", markup=True,
                               size_hint_y=None, height=dp(28),
                               color=(0.9, 0.9, 0.9, 1)))
         self.prop_box = BoxLayout(orientation="vertical", size_hint_y=None,
@@ -28,7 +28,7 @@ class Inspector(BoxLayout):
         self.add_widget(prop_scroll)
 
         # KV 代码区
-        self.add_widget(Label(text="[b]KV 代码[/b]", markup=True,
+        self.add_widget(Label(text="[b]KV Code[/b]", markup=True,
                               size_hint_y=None, height=dp(28),
                               color=(0.9, 0.9, 0.9, 1)))
         self.code_out = TextInput(
@@ -38,7 +38,7 @@ class Inspector(BoxLayout):
         )
         self.add_widget(self.code_out)
 
-        btn_copy = Button(text="复制 KV", size_hint_y=None, height=dp(36))
+        btn_copy = Button(text="Copy KV", size_hint_y=None, height=dp(36))
         btn_copy.bind(on_release=self._copy)
         self.add_widget(btn_copy)
 
@@ -55,16 +55,37 @@ class Inspector(BoxLayout):
     def show_props(self, canvas_node):
         self.prop_box.clear_widgets()
         if not canvas_node:
-            self.prop_box.add_widget(
-                Label(text="未选中控件", color=(0.6, 0.6, 0.6, 1),
-                      size_hint_y=None, height=dp(30)))
+            # 无选中 → 属性区用来改根节点类名
+            self._add_root_name_row()
             log.debug("属性面板：清空（无选中）")
             return
 
-        self._add_prop_row(canvas_node, "text", "文本")
-        self._add_prop_row(canvas_node, "width", "宽度")
-        self._add_prop_row(canvas_node, "height", "高度")
-        log.debug("属性面板：展示 id=%s 的 3 项属性", canvas_node.node.id)
+        self._add_id_row(canvas_node)
+        self._add_prop_row(canvas_node, "text", "Text")
+        self._add_prop_row(canvas_node, "width", "Width")
+        self._add_prop_row(canvas_node, "height", "Height")
+        log.debug("属性面板：展示 id=%s 的 4 项属性", canvas_node.node.id)
+
+    def _add_root_name_row(self):
+        row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
+        row.add_widget(Label(text="Root Name", size_hint_x=0.4,
+                             color=(0.85, 0.85, 0.85, 1)))
+        ti = TextInput(text=self.editor.root_class_name,
+                       multiline=False, size_hint_x=0.6)
+        ti.bind(on_text_validate=lambda *a:
+                self.editor.set_root_class_name(ti.text))
+        row.add_widget(ti)
+        self.prop_box.add_widget(row)
+
+    def _add_id_row(self, cn):
+        row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
+        row.add_widget(Label(text="ID", size_hint_x=0.4,
+                             color=(0.85, 0.85, 0.85, 1)))
+        ti = TextInput(text=cn.node.id, multiline=False, size_hint_x=0.6)
+        ti.bind(on_text_validate=lambda *a:
+                self.editor.set_id(cn, ti.text))
+        row.add_widget(ti)
+        self.prop_box.add_widget(row)
 
     def _add_prop_row(self, cn, key, label):
         row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))

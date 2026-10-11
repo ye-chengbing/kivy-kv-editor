@@ -72,7 +72,7 @@ class Palette(BoxLayout):
                          width=dp(180), padding=dp(8), spacing=dp(6), **kw)
         self.editor = editor
 
-        self.add_widget(Label(text="[b]组件库[/b]", markup=True,
+        self.add_widget(Label(text="[b]Components[/b]", markup=True,
                               size_hint_y=None, height=dp(32),
                               color=(0.9, 0.9, 0.9, 1)))
 
