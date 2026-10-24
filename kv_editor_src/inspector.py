@@ -1,10 +1,11 @@
-"""右侧属性/代码面板。只负责显示与收集输入，把动作转给 editor。"""
+"""右侧属性/代码面板。"""
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
+
 from .logger import get_logger
 
 log = get_logger("inspector")
@@ -15,95 +16,104 @@ class Inspector(BoxLayout):
         super().__init__(orientation="vertical", size_hint_x=None,
                          width=dp(330), padding=dp(8), spacing=dp(6), **kw)
         self.editor = editor
+        self._is_locked = False
 
-        # 属性区
+        self.lbl_lock = Label(text="", markup=True, color=(1, 0.3, 0.3, 1),
+                              size_hint_y=None, height=0)
+        self.add_widget(self.lbl_lock)
+
         self.add_widget(Label(text="[b]Properties[/b]", markup=True,
-                              size_hint_y=None, height=dp(28),
-                              color=(0.9, 0.9, 0.9, 1)))
-        self.prop_box = BoxLayout(orientation="vertical", size_hint_y=None,
-                                  spacing=dp(4))
+                              size_hint_y=None, height=dp(28)))
+        self.prop_box = BoxLayout(orientation="vertical",
+                                  size_hint_y=None, spacing=dp(4))
         self.prop_box.bind(minimum_height=self.prop_box.setter("height"))
+
         prop_scroll = ScrollView(size_hint_y=0.55)
         prop_scroll.add_widget(self.prop_box)
         self.add_widget(prop_scroll)
 
-        # KV 代码区
         self.add_widget(Label(text="[b]KV Code[/b]", markup=True,
-                              size_hint_y=None, height=dp(28),
-                              color=(0.9, 0.9, 0.9, 1)))
+                              size_hint_y=None, height=dp(28)))
         self.code_out = TextInput(
-            text="", readonly=True, font_size="12sp",
+            text="", readonly=True, font_size="12sp", size_hint_y=0.45,
             background_color=(0.1, 0.1, 0.12, 1),
-            foreground_color=(0.85, 0.95, 0.85, 1),
-        )
+            foreground_color=(0.85, 0.95, 0.85, 1))
         self.add_widget(self.code_out)
 
         btn_copy = Button(text="Copy KV", size_hint_y=None, height=dp(36))
         btn_copy.bind(on_release=self._copy)
         self.add_widget(btn_copy)
 
-        log.info("Inspector 初始化")
+    def _set_inputs_disabled(self, disabled):
+        for row in self.prop_box.children:
+            for child in row.children:
+                if isinstance(child, TextInput):
+                    child.disabled = disabled
+
+    def lock_ui(self, reason):
+        self._is_locked = True
+        self.lbl_lock.text = reason
+        self.lbl_lock.height = dp(40)
+        self._set_inputs_disabled(True)
+
+    def unlock_ui(self):
+        self._is_locked = False
+        self.lbl_lock.text = ""
+        self.lbl_lock.height = 0
+        self._set_inputs_disabled(False)
 
     def _copy(self, *a):
         try:
             from kivy.core.clipboard import Clipboard
             Clipboard.copy(self.code_out.text)
-            log.info("KV 已复制到剪贴板（%d 字符）", len(self.code_out.text))
-        except Exception as e:
-            log.warning("复制失败: %s", e)
+        except Exception:
+            log.exception("复制失败")
 
     def show_props(self, canvas_node):
         self.prop_box.clear_widgets()
         if not canvas_node:
-            # 无选中 → 属性区用来改根节点类名
             self._add_root_name_row()
-            log.debug("属性面板：清空（无选中）")
-            return
+        else:
+            self._add_id_row(canvas_node)
+            self._add_prop_row(canvas_node, "text", "Text")
+            self._add_prop_row(canvas_node, "width", "Width")
+            self._add_prop_row(canvas_node, "height", "Height")
 
-        self._add_id_row(canvas_node)
-        self._add_prop_row(canvas_node, "text", "Text")
-        self._add_prop_row(canvas_node, "width", "Width")
-        self._add_prop_row(canvas_node, "height", "Height")
-        log.debug("属性面板：展示 id=%s 的 4 项属性", canvas_node.node.id)
+        # 修：重建后按锁定状态重新禁用新控件
+        if self._is_locked:
+            self._set_inputs_disabled(True)
 
     def _add_root_name_row(self):
         row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
-        row.add_widget(Label(text="Root Name", size_hint_x=0.4,
-                             color=(0.85, 0.85, 0.85, 1)))
+        row.add_widget(Label(text="Root Name", size_hint_x=0.4))
         ti = TextInput(text=self.editor.root_class_name,
                        multiline=False, size_hint_x=0.6)
-        ti.bind(on_text_validate=lambda *a:
-                self.editor.set_root_class_name(ti.text))
+        ti.bind(on_text_validate=lambda *a: self.editor.set_root_class_name(ti.text))
         row.add_widget(ti)
         self.prop_box.add_widget(row)
 
     def _add_id_row(self, cn):
         row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
-        row.add_widget(Label(text="ID", size_hint_x=0.4,
-                             color=(0.85, 0.85, 0.85, 1)))
+        row.add_widget(Label(text="ID", size_hint_x=0.4))
         ti = TextInput(text=cn.node.id, multiline=False, size_hint_x=0.6)
-        ti.bind(on_text_validate=lambda *a:
-                self.editor.set_id(cn, ti.text))
+        ti.bind(on_text_validate=lambda *a: self.editor.set_id(cn, ti.text))
         row.add_widget(ti)
         self.prop_box.add_widget(row)
 
     def _add_prop_row(self, cn, key, label):
         row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
-        row.add_widget(Label(text=label, size_hint_x=0.4,
-                             color=(0.85, 0.85, 0.85, 1)))
+        row.add_widget(Label(text=label, size_hint_x=0.4))
 
         if key == "width":
-            ti = TextInput(text=str(int(cn.width)),
-                           multiline=False, size_hint_x=0.6)
+            ti = TextInput(text=str(int(cn.width)),multiline=False, size_hint_x=0.6)
             ti.bind(on_text_validate=lambda *a: self.editor.set_size(cn, "width", ti.text))
         elif key == "height":
-            ti = TextInput(text=str(int(cn.height)),
-                           multiline=False, size_hint_x=0.6)
+            ti = TextInput(text=str(int(cn.height)),multiline=False, size_hint_x=0.6)
             ti.bind(on_text_validate=lambda *a: self.editor.set_size(cn, "height", ti.text))
         else:
-            ti = TextInput(text=str(cn.node.props.get(key, "")),
-                           multiline=False, size_hint_x=0.6)
-            ti.bind(on_text_validate=lambda *a, k=key: self.editor.set_prop(cn, k, ti.text))
+            ti = TextInput(text=str(cn.node.props.get(key, "")),multiline=False, size_hint_x=0.6)
+            ti.bind(on_text_validate=lambda *a, k=key:
+                    self.editor.set_prop(cn, k, ti.text))
 
         row.add_widget(ti)
         self.prop_box.add_widget(row)

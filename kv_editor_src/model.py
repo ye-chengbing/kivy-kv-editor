@@ -1,5 +1,5 @@
-"""Node：纯数据模型，不依赖任何 UI。"""
 from kivy.metrics import dp
+
 from .logger import get_logger
 
 log = get_logger("model")
@@ -13,8 +13,9 @@ class Node:
         cls._counter += 1
         return f"w{cls._counter}"
 
-    def __init__(self, kind, **props):
-        self.id = Node.new_id()          # 走 new_id()，方便将来换规则
+    def __init__(self, kind, _id=None, **props):
+        # _id 用于 from_json：直接接管现有 id，不污染 _counter
+        self.id = _id if _id else Node.new_id()
         self.kind = kind
         self.props = {}
         self.children = []
@@ -48,7 +49,6 @@ class Node:
         #     `<Button>:` 给类加全局规则，多个会互相覆盖；
         #     `Button:` 才是在父级里放实例。这是语义修正。
         # ！！！绝对绝对绝对不要动它，现在能稳定跑是它对我们的宽容！！！
-        # ====================
         # ========================================================
         pad = "    " * indent
         lines = [f"{pad}{self.kind}:"]
@@ -98,39 +98,19 @@ class Node:
 
     @classmethod
     def from_json(cls, data):
-        """JSON dict → Node。
-
-        ==========
-        用于：
-            导入时把 JSON 结构转回节点树。
-        输入：
-            A：data: dict — {"id", "type", "props", "children"}
-        输出：
-            A：Node
-        ==========
-        """
-        node = cls(data["type"])
-        node.id = data["id"]
+        # 使用 _id 直接接管，避免无意义地递增 _counter
+        node = cls(data["type"], _id=data["id"])
         node.props = cls._props_from_json(data["props"])
         node.children = [cls.from_json(c) for c in data["children"]]
         return node
 
     @staticmethod
     def _props_to_json(props):
-        """tuple → list（JSON 没有 tuple）。"""
-        result = {}
-        for k, v in props.items():
-            if isinstance(v, tuple):
-                v = list(v)
-            result[k] = v
-        return result
+        return {k: (list(v) if isinstance(v, tuple) else v)
+                for k, v in props.items()}
 
     @staticmethod
     def _props_from_json(props):
-        """list → tuple（读 JSON 时坐标统一转 tuple）。"""
-        result = {}
-        for k, v in props.items():
-            if isinstance(v, list):
-                v = tuple(v)
-            result[k] = v
-        return result
+        # 学到一个新写法，拿来试试awa
+        return {k: (tuple(v) if isinstance(v, list) else v)
+                for k, v in props.items()}
